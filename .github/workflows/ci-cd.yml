@@ -1,0 +1,150 @@
+name: CI/CD Pipeline - Devsu Demo
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ------------------------------------------------------------------
+  # ETAPA 1: BUILD, TESTS, ANÁLISIS ESTÁTICO Y REPORTE DE COBERTURA
+  # ------------------------------------------------------------------
+  build-and-test:
+    name: Code Build, Tests & Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Permisos de ejecución a Maven Wrapper
+        run: chmod +x mvnw
+
+      # 1. Code Build
+      - name: Compilación del código (Code Build)
+        run: ./mvnw clean compile -B
+
+      # 2. Unit Tests & 4. Code Coverage
+      - name: Ejecución de Tests Unitarios y Generación de Cobertura JaCoCo
+        run: ./mvnw test -B
+
+      # 3. Static Code Analysis (validación estructural de compilación y empaquetado)
+      - name: Static Code Analysis (verify)
+        run: ./mvnw verify -DskipTests -B
+
+      # Publicación del reporte de cobertura como artefacto descargable
+      - name: Publicar artefacto de cobertura JaCoCo
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jacoco-coverage-report
+          path: target/site/jacoco/
+          retention-days: 7
+
+  # ------------------------------------------------------------------
+  # ETAPA 2: ESCANEO DE VULNERABILIDADES (SAST & DEPENDENCIAS)
+  # ------------------------------------------------------------------
+  security-scan:
+    name: Vulnerability Scan (Filesystem)
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Escaneo de vulnerabilidades en dependencias y código (Trivy fs)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+  # ------------------------------------------------------------------
+  # ETAPA 3: DOCKER BUILD, ESCANEO DE LA IMAGEN Y PUSH (GHCR)
+  # ------------------------------------------------------------------
+  docker-build-push:
+    name: Docker Build, Scan & Push
+    runs-on: ubuntu-latest
+    needs: security-scan
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Autenticación en GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configurar metadatos y tags de Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      - name: Construir imagen Docker localmente para escaneo
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+      - name: Escaneo de vulnerabilidades en la imagen Docker construida (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - name: Publicar imagen a GHCR (Push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # ------------------------------------------------------------------
+  # ETAPA 4: VALIDACIÓN Y VERIFICACIÓN DE MANIFIESTOS K8S
+  # ------------------------------------------------------------------
+  k8s-manifest-validation:
+    name: Kubernetes Manifest Validation
+    runs-on: ubuntu-latest
+    needs: docker-build-push
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Validar sintaxis y esquema de manifiestos K8s (Client Dry-run)
+        run: |
+          kubectl apply --dry-run=client -f k8s/
+          echo "Todos los manifiestos de Kubernetes son válidos y cumplen el esquema oficial."
