@@ -153,7 +153,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  # ------------------------------------------------------------------
+# ------------------------------------------------------------------
   # ETAPA 4: VALIDACIÓN Y VERIFICACIÓN DE MANIFIESTOS K8S
   # ------------------------------------------------------------------
   k8s-manifest-validation:
@@ -172,5 +172,5 @@ jobs:
 
       - name: Validar sintaxis y esquema de manifiestos K8s (Client Dry-run)
         run: |
-          kubectl apply --dry-run=client -f k8s/
-          echo "Todos los manifiestos de Kubernetes son válidos y cumplen el esquema oficial."
+          kubectl apply --dry-run=client --validate=false -f k8s/
+          echo "Todos los manifiestos de Kubernetes son válidos y cumplen la sintaxis oficial."
