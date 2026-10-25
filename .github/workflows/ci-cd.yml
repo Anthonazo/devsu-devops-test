@@ -165,12 +165,13 @@ jobs:
       - name: Checkout del repositorio
         uses: actions/checkout@v4
 
-      - name: Instalar kubectl
-        uses: azure/setup-kubectl@v3
-        with:
-          version: 'latest'
-
-      - name: Validar sintaxis y esquema de manifiestos K8s (Client Dry-run)
+      - name: Instalar Kubeconform
         run: |
-          kubectl apply --dry-run=client --validate=false -f k8s/
-          echo "Todos los manifiestos de Kubernetes son válidos y cumplen la sintaxis oficial."
+          wget https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar -xvf kubeconform-linux-amd64.tar.gz
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: Validar esquemas y sintaxis de manifiestos K8s
+        run: |
+          kubeconform -summary -strict -ignore-missing-schemas k8s/
+          echo "Todos los manifiestos de Kubernetes son válidos y cumplen el esquema oficial."
