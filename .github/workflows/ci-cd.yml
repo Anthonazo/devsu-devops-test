@@ -40,11 +40,10 @@ jobs:
       - name: Ejecución de Tests Unitarios y Generación de Cobertura JaCoCo
         run: ./mvnw test -B
 
-      # 3. Static Code Analysis (validación estructural de compilación y empaquetado)
+      # 3. Static Code Analysis
       - name: Static Code Analysis (verify)
         run: ./mvnw verify -DskipTests -B
 
-      # Publicación del reporte de cobertura como artefacto descargable
       - name: Publicar artefacto de cobertura JaCoCo
         uses: actions/upload-artifact@v4
         if: always()
@@ -75,18 +74,19 @@ jobs:
       - name: Permisos de ejecución a Maven Wrapper
         run: chmod +x mvnw
 
+      # Resuelve las dependencias localmente en ~/.m2
       - name: Pre-cargar dependencias de Maven en caché local
         run: ./mvnw dependency:go-offline -B
 
       - name: Escaneo de vulnerabilidades en dependencias y código (Trivy fs)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.24.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
-          scanners: 'vuln,secret'
+          trivy-ignores: ''
           severity: 'CRITICAL,HIGH'
           exit-code: '0'
-          
+
   # ------------------------------------------------------------------
   # ETAPA 3: DOCKER BUILD, ESCANEO DE LA IMAGEN Y PUSH (GHCR)
   # ------------------------------------------------------------------
@@ -126,7 +126,7 @@ jobs:
           tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
 
       - name: Escaneo de vulnerabilidades en la imagen Docker construida (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.24.0
         with:
           image-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
           format: 'table'
@@ -142,7 +142,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
   # ------------------------------------------------------------------
-  # ETAPA 4: VALIDACIÓN Y VERIFICACIÓN DE MANIFIESTOS K8S
+  # ETAPA 4: VALIDACIÓN DE MANIFIESTOS K8S
   # ------------------------------------------------------------------
   k8s-manifest-validation:
     name: Kubernetes Manifest Validation
@@ -161,4 +161,4 @@ jobs:
       - name: Validar sintaxis y esquema de manifiestos K8s (Client Dry-run)
         run: |
           kubectl apply --dry-run=client -f k8s/
-          echo "Todos los manifiestos de Kubernetes son válidos y cumplen el esquema oficial."
+          echo "Todos los manifiestos de Kubernetes son válidos."
