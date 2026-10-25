@@ -40,7 +40,7 @@ jobs:
       - name: Ejecución de Tests Unitarios y Generación de Cobertura JaCoCo
         run: ./mvnw test -B
 
-      # 3. Static Code Analysis (validación estructural de compilación y empaquetado)
+      # 3. Static Code Analysis
       - name: Static Code Analysis (verify)
         run: ./mvnw verify -DskipTests -B
 
@@ -65,13 +65,30 @@ jobs:
       - name: Checkout del repositorio
         uses: actions/checkout@v4
 
-      - name: Escaneo de vulnerabilidades en dependencias y código (Trivy fs)
-        uses: aquasecurity/trivy-action@master
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
         with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '0'
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Permisos de ejecución a Maven Wrapper
+        run: chmod +x mvnw
+
+      # Poblar la caché local en ~/.m2 para que Trivy no consulte Maven Central
+      - name: Descargar dependencias en caché local
+        run: ./mvnw dependency:resolve -B
+
+      - name: Instalar Trivy CLI
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update -y && sudo apt-get install -y trivy
+
+      - name: Escaneo de vulnerabilidades local (Trivy offline)
+        run: |
+          trivy fs --offline-scan --scanners vuln,secret --severity CRITICAL,HIGH --exit-code 0 .
 
   # ------------------------------------------------------------------
   # ETAPA 3: DOCKER BUILD, ESCANEO DE LA IMAGEN Y PUSH (GHCR)
@@ -87,6 +104,13 @@ jobs:
     steps:
       - name: Checkout del repositorio
         uses: actions/checkout@v4
+
+      - name: Instalar Trivy CLI
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update -y && sudo apt-get install -y trivy
 
       - name: Autenticación en GitHub Container Registry
         uses: docker/login-action@v3
@@ -111,13 +135,9 @@ jobs:
           load: true
           tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
 
-      - name: Escaneo de vulnerabilidades en la imagen Docker construida (Trivy)
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
-          format: 'table'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '0'
+      - name: Escaneo de vulnerabilidades en la imagen Docker construida
+        run: |
+          trivy image --severity CRITICAL,HIGH --exit-code 0 ghcr.io/${{ github.repository }}:${{ github.sha }}
 
       - name: Publicar imagen a GHCR (Push)
         uses: docker/build-push-action@v5
