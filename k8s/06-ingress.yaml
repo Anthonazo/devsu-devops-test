@@ -4,10 +4,12 @@ metadata:
   name: demo-app-ingress
   namespace: devsu-demo
   annotations:
-    nginx.ingress.kubernetes.io/proxy-connect-timeout: "15"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts: [demo.devsu.local]
+      secretName: demo-app-tls
   rules:
     - host: demo.devsu.local
       http:
@@ -18,4 +20,4 @@ spec:
               service:
                 name: demo-app-service
                 port:
-                  number: 80
+                  name: http

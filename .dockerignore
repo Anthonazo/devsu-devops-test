@@ -1,9 +1,9 @@
+**/.git
+**/.gitignore
+.github/
+k8s/
+*.md
 target/
-.git/
-.gitignore
 .idea/
-*.iml
 .vscode/
-*.mv.db
-*.trace.db
-README.md
+*.iml

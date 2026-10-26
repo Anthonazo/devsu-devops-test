@@ -4,6 +4,7 @@ metadata:
   name: demo-app-config
   namespace: devsu-demo
 data:
-  SERVER_PORT: "8000"
-  SPRING_PROFILES_ACTIVE: "prod"
-  JAVA_OPTS: "-Xms256m -Xmx512m -XX:+UseG1GC"
+  PORT: "8000"
+  NAME_DB: "jdbc:h2:file:/app/data/test"
+  JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:+ExitOnOutOfMemoryError"
+  
