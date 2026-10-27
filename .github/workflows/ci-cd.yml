@@ -123,8 +123,10 @@ jobs:
           kubectl -n devsu-demo rollout status deployment/demo-app-deployment --timeout=240s
       - name: Smoke test
         run: |
-          kubectl -n devsu-demo run smoke --rm -i --restart=Never --image=curlimages/curl -- \
-            curl -sf http://demo-app-service/api/users
+          kubectl -n devsu-demo port-forward svc/demo-app-service 8080:80 &
+          PF_PID=$!
+          trap 'kill $PF_PID' EXIT
+          curl -sf --retry 5 --retry-connrefused --retry-delay 2 http://localhost:8080/api/users
       - name: Estado final
         if: always()
         run: kubectl -n devsu-demo get all,hpa,pdb,ingress
