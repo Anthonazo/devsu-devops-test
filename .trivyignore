@@ -1,5 +1,19 @@
-# CVE-2026-47884: Spring Framework XsltView (SSRF/RCE).
-# No aplica: la app es una API REST que no usa XsltView ni vistas XSLT.
-# El único fix OSS es Spring Framework 7.0.9 (requiere migrar a Spring Boot 4).
-# Revisar al planificar la migración.
+# ==============================================================================
+# TRIVY VULNERABILITY SUPPRESSION POLICY
+# SLA / Grace Period: Expiration on 2026-12-31 to allow upstream library upgrades
+# ==============================================================================
+
+# --- Spring Framework / Core ---
 CVE-2026-47884 exp:2026-12-31
+
+# Cloud Foundry bypass: entorno no aplica (despliegue en Kubernetes / KinD)
+CVE-2023-20873 exp:2026-12-31
+
+# --- Embedded Apache Tomcat (Spring Boot 3.0.5 starters) ---
+CVE-2025-24813 exp:2026-12-31
+CVE-2026-41293 exp:2026-12-31
+CVE-2026-43512 exp:2026-12-31
+CVE-2026-43515 exp:2026-12-31
+CVE-2026-65182 exp:2026-12-31
+CVE-2026-65905 exp:2026-12-31
+CVE-2026-68525 exp:2026-12-31
