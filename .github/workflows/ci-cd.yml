@@ -1,177 +1,131 @@
 name: CI/CD Pipeline - Devsu Demo
-
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main", "master" ]
-
+    branches: ["main"]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-
+  TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db
 jobs:
-  # ------------------------------------------------------------------
-  # ETAPA 1: BUILD, TESTS, ANÁLISIS ESTÁTICO Y REPORTE DE COBERTURA
-  # ------------------------------------------------------------------
-  build-and-test:
-    name: Code Build, Tests & Coverage
+  build-test-analyze:
+    name: Build, Tests, Coverage & Static Analysis
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout del repositorio
-        uses: actions/checkout@v4
-
-      - name: Configurar JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: maven
-
-      - name: Permisos de ejecución a Maven Wrapper
-        run: chmod +x mvnw
-
-      # 1. Code Build
-      - name: Compilación del código (Code Build)
-        run: ./mvnw clean compile -B
-
-      # 2. Unit Tests & 4. Code Coverage
-      - name: Ejecución de Tests Unitarios y Generación de Cobertura JaCoCo
-        run: ./mvnw test -B
-
-      # 3. Static Code Analysis
-      - name: Static Code Analysis (verify)
-        run: ./mvnw verify -DskipTests -B
-
-      # Publicación del reporte de cobertura como artefacto descargable
-      - name: Publicar artefacto de cobertura JaCoCo
-        uses: actions/upload-artifact@v4
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-java@v4
+        with: { java-version: '17', distribution: temurin, cache: maven }
+      - name: Code Build
+        run: ./mvnw -B clean compile
+      - name: Unit Tests + Coverage (JaCoCo + umbral)
+        run: ./mvnw -B verify
+      - name: Static Code Analysis (SonarCloud)
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./mvnw -B org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
+      - name: Publicar reportes
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: jacoco-coverage-report
-          path: target/site/jacoco/
-          retention-days: 7
-
-  # ------------------------------------------------------------------
-  # ETAPA 2: ESCANEO DE VULNERABILIDADES (SAST & DEPENDENCIAS)
-  # ------------------------------------------------------------------
+          name: test-and-coverage-reports
+          path: |
+            target/site/jacoco/
+            target/surefire-reports/
   security-scan:
-    name: Vulnerability Scan (Filesystem)
+    name: Vulnerability Scan (deps & secrets)
     runs-on: ubuntu-latest
-    needs: build-and-test
-
+    needs: build-test-analyze
     steps:
-      - name: Checkout del repositorio
-        uses: actions/checkout@v4
-
-      - name: Configurar JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@0.28.0
         with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: maven
-
-      - name: Permisos de ejecución a Maven Wrapper
-        run: chmod +x mvnw
-
-      # Poblar la caché local en ~/.m2 para que Trivy no consulte Maven Central
-      - name: Descargar dependencias en caché local
-        run: ./mvnw dependency:resolve -B
-
-      - name: Instalar Trivy CLI
+          scan-type: fs
+          scanners: vuln,secret
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+  k8s-validate:
+    name: Kubernetes Manifest Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: kubeconform
         run: |
-          sudo apt-get update -y && sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
-          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update -y && sudo apt-get install -y trivy
-
-      - name: Escaneo de vulnerabilidades local (Trivy offline)
-        run: |
-          trivy fs --offline-scan --scanners vuln,secret --severity CRITICAL,HIGH --exit-code 0 .
-
-# ------------------------------------------------------------------
-  # ETAPA 3: DOCKER BUILD, ESCANEO DE LA IMAGEN Y PUSH (GHCR)
-  # ------------------------------------------------------------------
-  docker-build-push:
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
+          ./kubeconform -summary -strict k8s/
+  docker:
     name: Docker Build, Scan & Push
     runs-on: ubuntu-latest
-    needs: security-scan
+    needs: [security-scan, k8s-validate]
+    if: github.event_name != 'pull_request'
     permissions:
       contents: read
       packages: write
-
+    outputs:
+      image: ${{ steps.vars.outputs.image }}
     steps:
-      - name: Checkout del repositorio
-        uses: actions/checkout@v4
-
-      # Convertir el nombre del repositorio a minúsculas para cumplir con Docker/OCI
-      - name: Normalizar nombre del repositorio a minúsculas
-        id: repo_name
-        run: |
-          echo "IMAGE_LOWER=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
-      - name: Instalar Trivy CLI
-        run: |
-          sudo apt-get update -y && sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
-          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update -y && sudo apt-get install -y trivy
-
-      - name: Autenticación en GitHub Container Registry
-        uses: docker/login-action@v3
+      - uses: actions/checkout@v4
+      - id: vars
+        run: echo "image=${REGISTRY}/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configurar metadatos y tags de Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ env.IMAGE_LOWER }}
-          tags: |
-            type=raw,value=latest
-            type=sha,format=short
-
-      - name: Construir imagen Docker localmente para escaneo
-        uses: docker/build-push-action@v5
+      - name: Build (una sola vez)
+        uses: docker/build-push-action@v6
         with:
           context: .
           load: true
-          tags: ghcr.io/${{ env.IMAGE_LOWER }}:${{ github.sha }}
-
-      - name: Escaneo de vulnerabilidades en la imagen Docker construida
-        run: |
-          trivy image --severity CRITICAL,HIGH --exit-code 0 ghcr.io/${{ env.IMAGE_LOWER }}:${{ github.sha }}
-
-      - name: Publicar imagen a GHCR (Push)
-        uses: docker/build-push-action@v5
+          tags: |
+            ${{ steps.vars.outputs.image }}:${{ github.sha }}
+            ${{ steps.vars.outputs.image }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Scan de la imagen
+        uses: aquasecurity/trivy-action@0.28.0
         with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
-# ------------------------------------------------------------------
-  # ETAPA 4: VALIDACIÓN Y VERIFICACIÓN DE MANIFIESTOS K8S
-  # ------------------------------------------------------------------
-  k8s-manifest-validation:
-    name: Kubernetes Manifest Validation
+          image-ref: ${{ steps.vars.outputs.image }}:${{ github.sha }}
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Push (la misma imagen escaneada)
+        run: docker push --all-tags ${{ steps.vars.outputs.image }}
+  deploy:
+    name: Deploy to Kubernetes
     runs-on: ubuntu-latest
-    needs: docker-build-push
-
+    needs: docker
+    environment: production
     steps:
-      - name: Checkout del repositorio
-        uses: actions/checkout@v4
-
-      - name: Instalar Kubeconform
+      - uses: actions/checkout@v4
+      - name: Crear clúster Kubernetes (kind)
+        uses: helm/kind-action@v1
+        with: { cluster_name: devsu }
+      - name: Desplegar
         run: |
-          wget https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
-          tar -xvf kubeconform-linux-amd64.tar.gz
-          sudo mv kubeconform /usr/local/bin/
-
-      - name: Validar esquemas y sintaxis de manifiestos K8s
+          kubectl apply -f k8s/00-namespace.yaml
+          kubectl -n devsu-demo create secret generic demo-app-secret \
+            --from-literal=USERNAME_DB='${{ secrets.DB_USERNAME }}' \
+            --from-literal=PASSWORD_DB='${{ secrets.DB_PASSWORD }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f k8s/
+          kubectl -n devsu-demo set image deployment/demo-app-deployment \
+            demo-app=${{ needs.docker.outputs.image }}:${{ github.sha }}
+          kubectl -n devsu-demo rollout status deployment/demo-app-deployment --timeout=240s
+      - name: Smoke test
         run: |
-          kubeconform -summary -strict -ignore-missing-schemas k8s/
-          echo "Todos los manifiestos de Kubernetes son válidos y cumplen el esquema oficial."
+          kubectl -n devsu-demo run smoke --rm -i --restart=Never --image=curlimages/curl -- \
+            curl -sf http://demo-app-service/api/users
+      - name: Estado final
+        if: always()
+        run: kubectl -n devsu-demo get all,hpa,pdb,ingress
