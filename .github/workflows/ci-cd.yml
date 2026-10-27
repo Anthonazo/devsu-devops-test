@@ -59,7 +59,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: kubeconform
         run: |
-          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
+          curl --proto '=https' --tlsv1.2 -sSfL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
           ./kubeconform -summary -strict k8s/
   docker:
     name: Docker Build, Scan & Push
@@ -117,11 +117,14 @@ jobs:
             -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
           kubectl -n kube-system rollout status deployment/metrics-server --timeout=120s
       - name: Desplegar
+        env:
+          DB_USER: ${{ secrets.DB_USERNAME }}
+          DB_PASS: ${{ secrets.DB_PASSWORD }}
         run: |
           kubectl apply -f k8s/00-namespace.yaml
           kubectl -n devsu-demo create secret generic demo-app-secret \
-            --from-literal=USERNAME_DB='${{ secrets.DB_USERNAME }}' \
-            --from-literal=PASSWORD_DB='${{ secrets.DB_PASSWORD }}' \
+            --from-literal=USERNAME_DB="$DB_USER" \
+            --from-literal=PASSWORD_DB="$DB_PASS" \
             --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply -f k8s/
           kubectl -n devsu-demo set image deployment/demo-app-deployment \
