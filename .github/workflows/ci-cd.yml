@@ -110,6 +110,12 @@ jobs:
       - name: Crear clúster Kubernetes (kind)
         uses: helm/kind-action@v1
         with: { cluster_name: devsu }
+      - name: Instalar metrics-server (necesario para el HPA)
+        run: |
+          kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.7.2/components.yaml
+          kubectl -n kube-system patch deployment metrics-server --type=json \
+            -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+          kubectl -n kube-system rollout status deployment/metrics-server --timeout=120s
       - name: Desplegar
         run: |
           kubectl apply -f k8s/00-namespace.yaml
@@ -127,6 +133,12 @@ jobs:
           PF_PID=$!
           trap 'kill $PF_PID' EXIT
           curl -sf --retry 5 --retry-connrefused --retry-delay 2 http://localhost:8080/api/users
+      - name: Esperar métricas del HPA
+        run: |
+          for i in $(seq 1 12); do
+            kubectl -n devsu-demo get hpa demo-app-hpa -o jsonpath='{.status.currentMetrics}' | grep -q cpu && break
+            sleep 10
+          done
       - name: Estado final
         if: always()
         run: kubectl -n devsu-demo get all,hpa,pdb,ingress
