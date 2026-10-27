@@ -1,0 +1,5 @@
+# CVE-2026-47884: Spring Framework XsltView (SSRF/RCE).
+# No aplica: la app es una API REST que no usa XsltView ni vistas XSLT.
+# El único fix OSS es Spring Framework 7.0.9 (requiere migrar a Spring Boot 4).
+# Revisar al planificar la migración.
+CVE-2026-47884 exp:2026-12-31
