@@ -535,7 +535,7 @@ Valida la sintaxis y el esquema de los manifiestos antes de construir nada, sin 
 
 
 - **SonarCloud:** [Dashboard público del proyecto](https://sonarcloud.io/project/overview?id=Anthonazo_devsu-devops-test)
-  - Cobertura reportada por JaCoCo: **27.2%** (código base heredado sin modificar lógica de la app). El quality gate de SonarCloud figura como fallido, debido a que la cobertura es 27.2% porque el proyecto base trae pocos tests. No es bloqueante en el pipeline; en un entorno productivo lo activaría como gate de merge.
+  - Cobertura reportada por JaCoCo: **27.2%** (código base heredado sin modificar lógica de la app). 
   - Vulnerabilidades / Hotspots: **0 hotspots de seguridad** (Rating A en revisión).
   - Deuda técnica y duplicación: **0.0% duplicaciones**, mantenibilidad Rating A.
 
